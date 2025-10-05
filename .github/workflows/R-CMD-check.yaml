@@ -41,11 +41,54 @@ jobs:
           http-user-agent: ${{ matrix.config.http-user-agent }}
           use-public-rspm: true
 
+      # -------- Ubuntu-only: toolchain for CmdStan --------
+      - name: Install build tools (Ubuntu)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential g++ make
+          echo "MAKEFLAGS=-j2" >> $GITHUB_ENV
+
+      # -------- Dependencies (hard deps only via r-lib) --------
       - uses: r-lib/actions/setup-r-dependencies@v2
         with:
+          dependencies: '"hard"'            # only Depends/Imports/LinkingTo
           extra-packages: any::rcmdcheck
           needs: check
 
+      # -------- Ubuntu-only: install cmdstanr + cache CmdStan --------
+      - name: Install cmdstanr (Ubuntu)
+        if: runner.os == 'Linux'
+        run: |
+          R -q -e 'install.packages("cmdstanr", repos = c("https://mc-stan.org/r-packages/", getOption("repos")))'
+
+      - name: Cache CmdStan (Ubuntu)
+        if: runner.os == 'Linux'
+        uses: actions/cache@v4
+        with:
+          path: ~/.cmdstan
+          key: cmdstan-${{ runner.os }}-2
+
+      - name: Install CmdStan (Ubuntu)
+        if: runner.os == 'Linux'
+        run: |
+          R -q -e 'dir <- "~/.cmdstan"; if (!dir.exists(dir)) dir.create(dir, recursive = TRUE)'
+          R -q -e 'cmdstanr::install_cmdstan(dir = "~/.cmdstan", cores = 2, quiet = TRUE)'
+
+      - name: Enable Stan tests (Ubuntu)
+        if: runner.os == 'Linux'
+        run: echo "CMDSTAN_OK=true" >> $GITHUB_ENV
+
+      # (Optional) quick diagnostics on Ubuntu
+      - name: Diagnostics (Ubuntu)
+        if: runner.os == 'Linux'
+        run: |
+          R -q -e 'sessionInfo()'
+          R -q -e 'print(cmdstanr::cmdstan_path()); print(cmdstanr::cmdstan_version())'
+          which g++ && g++ --version
+          make --version
+
+      # -------- Check --------
       - uses: r-lib/actions/check-r-package@v2
         with:
           upload-snapshots: true
