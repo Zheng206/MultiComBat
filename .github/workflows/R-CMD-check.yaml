@@ -53,7 +53,9 @@ jobs:
       - uses: r-lib/actions/setup-r-dependencies@v2
         with:
           dependencies: '"hard"'            # only Depends/Imports/LinkingTo
-          extra-packages: any::rcmdcheck
+          extra-packages: |
+            any::rcmdcheck
+            any::testthat
           needs: check
 
       # -------- Ubuntu-only: install cmdstanr + cache CmdStan --------
