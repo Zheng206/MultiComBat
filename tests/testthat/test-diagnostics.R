@@ -141,24 +141,6 @@ test_that("manova_test flags mean differences; boxM_simple flags covariance diff
   expect_lt(as.numeric(bm$test_table$p.value[1]), 0.01)
 })
 
-test_that("boxM_simple behaves on equal vs different covariances", {
-  set.seed(7)
-  n <- 120; p <- 3
-  S <- matrix(c(1, .4, .2, .4, 1, .1, .2, .1, 1), p, p)
-  Y1 <- MASS::mvrnorm(n/2, mu = rep(0, p), Sigma = S)
-  Y2 <- MASS::mvrnorm(n/2, mu = rep(0, p), Sigma = S)
-  Y  <- rbind(Y1, Y2)
-  g  <- factor(rep(c("A","B"), each = n/2))
-  out_eq <- boxM_simple(Y, g)
-  expect_gt(out_eq$p.value, 0.10)
-
-  S2 <- matrix(c(1.4, .7, .1, .7, 1.8, .2, .1, .2, 0.9), p, p)
-  Y2d <- MASS::mvrnorm(n/2, mu = rep(0, p), Sigma = S2)
-  Yd  <- rbind(Y1, Y2d)
-  out_diff <- boxM_simple(Yd, g)
-  expect_lt(out_diff$p.value, 0.05)
-})
-
 test_that("covariance metrics are zero when Sigma_hat equals to Sigma", {
   S <- diag(3)
   expect_equal(frobenius_norm(S, S), 0)
