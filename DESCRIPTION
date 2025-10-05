@@ -1,0 +1,27 @@
+Package: MultiComBat
+Title: What the Package Does (One Line, Title Case)
+Version: 0.0.0.9000
+Authors@R: 
+    person("Zheng", "Ren", , "zren29@gmail.com", role = c("aut", "cre"),
+           comment = c(ORCID = "0009-0006-2430-4625"))
+Description: What the package does (one paragraph).
+License: MIT + file LICENSE
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.3.2
+Imports: 
+    broom,
+    car,
+    cmdstanr,
+    dplyr,
+    ggplot2,
+    lme4,
+    magrittr,
+    MASS,
+    MCMCpack,
+    mgcv,
+    purrr,
+    tidyr
+Suggests: 
+    testthat (>= 3.0.0)
+Config/testthat/edition: 3
