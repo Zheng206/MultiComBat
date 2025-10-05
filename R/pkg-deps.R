@@ -25,7 +25,6 @@
 #'
 #' @importFrom MCMCpack rinvgamma riwish
 #'
-#' @import cmdstanr
 #'
 #' @noRd
 NULL

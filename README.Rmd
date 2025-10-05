@@ -19,7 +19,7 @@ devtools::load_all()
 
 <!-- badges: start -->
 [![R-CMD-check](https://github.com/Zheng206/MultiComBat/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/Zheng206/MultiComBat/actions/workflows/R-CMD-check.yaml)
-[![test-coverage](https://github.com/Zheng206/MultiComBat/actions/workflows/test-coverage.yaml/badge.svg)](https://github.com/Zheng206/MultiComBat/actions/workflows/test-coverage.yaml)
+[![Codecov test coverage](https://codecov.io/gh/Zheng206/MultiComBat/graph/badge.svg)](https://app.codecov.io/gh/Zheng206/MultiComBat)
 <!-- badges: end -->
 
 The goal of MultiComBat is to ...

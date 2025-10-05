@@ -1,3 +1,20 @@
+.need_cmdstanr <- function() {
+  if (!requireNamespace("cmdstanr", quietly = TRUE)) {
+    stop(
+      "This feature requires the 'cmdstanr' package.\n",
+      "Install via:\n",
+      "install.packages('cmdstanr', ",
+      "repos = c('https://mc-stan.org/r-packages/', getOption('repos')))\n",
+      call. = FALSE
+    )
+  }
+  if (is.na(cmdstanr::cmdstan_version())) {
+    stop("CmdStan is not installed. Run: cmdstanr::install_cmdstan()", call. = FALSE)
+  }
+  invisible(TRUE)
+}
+
+
 #' Locate and (lazily) compile a Stan model
 #'
 #' Finds \code{inst/stan/<name>.stan} inside the package and compiles it to a

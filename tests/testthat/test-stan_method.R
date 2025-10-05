@@ -1,3 +1,14 @@
+skip_if_no_stan <- function() {
+  if (!requireNamespace("cmdstanr", quietly = TRUE)) {
+    testthat::skip("cmdstanr not installed")
+  }
+  ver <- try(cmdstanr::cmdstan_version(), silent = TRUE)
+  if (inherits(ver, "try-error") || is.na(ver)) {
+    testthat::skip("CmdStan not installed (run cmdstanr::install_cmdstan())")
+  }
+}
+
+skip_if_no_stan()
 test_that("get_stan_model errors cleanly when model file is missing", {
   expect_error(
     get_stan_model("__this_model_does_not_exist__"),
