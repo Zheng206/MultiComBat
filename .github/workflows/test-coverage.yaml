@@ -68,8 +68,7 @@ jobs:
           files: ./cobertura.xml
           plugins: noop
           disable_search: true
-          fail_ci_if_error: ${{ github.event_name != 'pull_request' || secrets.CODECOV_TOKEN }}
-          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false
 
       - name: Show testthat output
         if: always()
