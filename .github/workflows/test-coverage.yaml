@@ -14,6 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
+      MAKEFLAGS: "-j2"
 
     steps:
       - uses: actions/checkout@v4
@@ -22,11 +23,35 @@ jobs:
         with:
           use-public-rspm: true
 
-      - uses: r-lib/actions/setup-r-dependencies@v2
-        with:
-          extra-packages: any::covr, any::xml2
-          needs: coverage
+      # --- System toolchain for CmdStan ---
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential g++ make
 
+      # --- Install R deps explicitly (no pak lockfile) ---
+      - name: Install R dependencies (incl. cmdstanr)
+        run: |
+          R -q -e 'install.packages("remotes")'
+          R -q -e 'install.packages("cmdstanr", repos = c("https://mc-stan.org/r-packages/", getOption("repos")) )'
+          R -q -e 'remotes::install_deps(dependencies = "hard")'
+          R -q -e 'install.packages(c("covr","xml2","testthat"))'
+
+      # --- Cache CmdStan build directory ---
+      - name: Cache CmdStan
+        uses: actions/cache@v4
+        with:
+          path: ~/.cmdstan
+          key: cmdstan-${{ runner.os }}-2
+
+      # --- Install (or reuse) CmdStan ---
+      - name: Install CmdStan
+        run: |
+          R -q -e 'dir <- "~/.cmdstan"; if (!dir.exists(dir)) dir.create(dir, recursive = TRUE)'
+          R -q -e 'cmdstanr::install_cmdstan(dir = "~/.cmdstan", cores = 2, quiet = TRUE)'
+          R -q -e 'print(cmdstanr::cmdstan_path()); print(cmdstanr::cmdstan_version())'
+
+      # --- Run coverage ---
       - name: Test coverage
         run: |
           cov <- covr::package_coverage(
@@ -35,22 +60,20 @@ jobs:
             install_path = file.path(normalizePath(Sys.getenv("RUNNER_TEMP"), winslash = "/"), "package")
           )
           print(cov)
-          covr::to_cobertura(cov)
+          covr::to_cobertura(cov, file = "cobertura.xml")
         shell: Rscript {0}
 
       - uses: codecov/codecov-action@v5
         with:
-          # Fail if error if not on PR, or if on PR and token is given
-          fail_ci_if_error: ${{ github.event_name != 'pull_request' || secrets.CODECOV_TOKEN }}
           files: ./cobertura.xml
           plugins: noop
           disable_search: true
+          fail_ci_if_error: ${{ github.event_name != 'pull_request' || secrets.CODECOV_TOKEN }}
           token: ${{ secrets.CODECOV_TOKEN }}
 
       - name: Show testthat output
         if: always()
         run: |
-          ## --------------------------------------------------------------------
           find '${{ runner.temp }}/package' -name 'testthat.Rout*' -exec cat '{}' \; || true
         shell: bash
 
