@@ -127,6 +127,44 @@ test_that("com_harm (univariate) eb=FALSE works as expected", {
   expect_equal(eb$delta_star, eb$delta_hat)
 })
 
+
+test_that("com_harm (univariate) cov=TRUE works as expected", {
+  set.seed(789)
+
+  sim <- simulate_data.m(
+    m = 3, n = 50, p = 10, K = 2,
+    add_covariates = TRUE, add_biomarkers = FALSE,
+    prior_type = "covbat", seed = 789
+  )
+
+  Y   <- as.matrix(sim$data[[1]])
+  bat <- sim$batch[[1]]
+  cov <- sim$covariates[[1]]
+
+  rhs  <- paste(colnames(cov), collapse = " + ")
+  form <- stats::as.formula(paste("y ~", rhs))
+
+  out <- suppressWarnings(com_harm(
+    bat    = bat,
+    data   = Y,
+    covar  = cov,
+    model  = lm,
+    formula = form,
+    ref.batch = NULL,
+    eb     = TRUE,
+    stan   = FALSE,
+    robust.LS = FALSE,
+    cov = TRUE
+  ))
+
+  eb <- out$eb_result
+  expect_true(all(c("gamma_star", "delta_star", "gamma_hat", "delta_hat") %in% names(eb)))
+  expect_equal(dim(eb$gamma_star), c(nlevels(bat), ncol(Y)))
+  expect_equal(dim(eb$delta_star), c(nlevels(bat), ncol(Y)))
+  expect_false(any(!is.finite(eb$gamma_star)))
+  expect_true(all(eb$delta_star > 0))
+})
+
 test_that("com_harm (univariate) robust.LS helps under outliers", {
   set.seed(2468)
 
@@ -340,6 +378,67 @@ test_that("com_harm.multivariate with eb=FALSE returns hat==star in EB payload",
     expect_equal(eb$gamma_star[[b]], eb$gamma_hat[[b]])
     for (g in seq_len(length(eb$delta_star[[b]]))) {
       expect_equal(eb$delta_star[[b]][[g]], eb$delta_hat[[b]][[g]])
+    }
+  }
+})
+
+test_that("com_harm.multivariate with cov=TRUE works successfully", {
+  set.seed(1003)
+  m_meas <- 3
+  sim <- simulate_data.m(
+    m = m_meas, n = 50, p = 10, K = 2,
+    add_covariates = TRUE, add_biomarkers = FALSE,
+    prior_type = "covbat_hier", seed = 1003
+  )
+
+  Y_list <- sim$data
+  bat    <- sim$batch
+  covs   <- sim$covariates
+  rhs  <- paste(colnames(covs[[1]]), collapse = " + ")
+  form <- stats::as.formula(paste("y ~", rhs))
+
+  out <- suppressWarnings(com_harm.multivariate(
+    bat      = sim$batch,
+    data     = Y_list,
+    covar    = covs,
+    model    = lm,
+    formula  = form,
+    ref.batch = NULL,
+    eb       = TRUE,
+    stan     = FALSE,
+    robust.LS = FALSE,
+    cov = TRUE
+  ))
+
+  # Structure
+  expect_true(is.list(out))
+  expect_true(all(c("harm_data", "resid", "eb_result") %in% names(out)))
+  expect_equal(length(out$harm_data), m_meas)
+  expect_equal(length(out$resid),     m_meas)
+
+  n <- nrow(Y_list[[1]]); G <- ncol(Y_list[[1]])
+  for (i in seq_len(m_meas)) {
+    expect_equal(dim(out$harm_data[[i]]), c(n, G))
+    expect_false(any(!is.finite(as.matrix(out$harm_data[[i]]))))
+    expect_false(any(!is.finite(as.matrix(out$resid[[i]]))))
+  }
+
+  eb <- out$eb_result
+  batches <- levels(bat[[1]])
+  expect_equal(sort(names(eb$gamma_star)), sort(batches))
+  expect_equal(sort(names(eb$delta_star)), sort(batches))
+
+  for (b in batches) {
+    expect_equal(dim(eb$gamma_star[[b]]), c(m_meas, G))
+    expect_false(any(!is.finite(eb$gamma_star[[b]])))
+    expect_equal(length(eb$delta_star[[b]]), G)
+    for (g in seq_len(G)) {
+      S <- eb$delta_star[[b]][[g]]
+      expect_equal(dim(S), c(m_meas, m_meas))
+      expect_true(isTRUE(all(abs(S - t(S)) < 1e-8)))
+      ev <- eigen(S, symmetric = TRUE, only.values = TRUE)$values
+      expect_true(all(is.finite(ev)))
+      expect_gt(min(ev), 0)  # PD
     }
   }
 })

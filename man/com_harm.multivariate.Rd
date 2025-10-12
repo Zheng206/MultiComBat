@@ -14,6 +14,10 @@ com_harm.multivariate(
   eb = TRUE,
   stan = FALSE,
   robust.LS = FALSE,
+  cov = FALSE,
+  var_thresh = 0.95,
+  min_rblock = 1,
+  max_rblock = Inf,
   ...
 )
 }
@@ -42,6 +46,20 @@ or \code{NULL} to fit null models.}
 
 \item{robust.LS}{Logical; if \code{TRUE}, use robust estimators
 (\code{\link{biweight_midvar}}, \code{\link{biweight_midvar_mul}}).}
+
+\item{cov}{Logical; if \code{TRUE}, apply an additional CovBat-style PCA
+score-space coupling across measurements after the main multivariate step
+(default \code{FALSE}).}
+
+\item{var_thresh}{Numeric in (0,1]; cumulative explained-variance threshold used
+to choose how many PC scores per measurement are used in the stage-2 coupling
+(default \code{0.95}).}
+
+\item{min_rblock}{Integer; minimum number of PC scores per measurement used in
+stage-2 coupling (default \code{1}).}
+
+\item{max_rblock}{Integer; maximum number of PC scores per measurement used in
+stage-2 coupling (default \code{Inf}).}
 
 \item{...}{Additional arguments forwarded to \code{model}.}
 }

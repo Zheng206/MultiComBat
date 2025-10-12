@@ -14,6 +14,10 @@ com_harm(
   eb = TRUE,
   stan = FALSE,
   robust.LS = FALSE,
+  cov = FALSE,
+  var_thresh = 0.95,
+  min_rblock = 1,
+  max_rblock = Inf,
   ...
 )
 }
@@ -41,6 +45,19 @@ are taken under this batch; final output replaces those rows with the original v
 
 \item{robust.LS}{Logical; if \code{TRUE}, use robust scale estimators
 (\code{\link{biweight_midvar}}) in standardization/dispersion.}
+
+\item{cov}{Logical; if \code{TRUE}, apply an additional CovBat-style covariance
+harmonization in PCA score space after ComBat mean/variance adjustment (default \code{FALSE}).}
+
+\item{var_thresh}{Numeric in (0,1]; cumulative explained-variance threshold used
+to choose how many PC scores are harmonized when \code{cov = TRUE}
+(passed to \code{\link{pick_r_from_pc}}; default \code{0.95}).}
+
+\item{min_rblock}{Integer; minimum number of PC scores to harmonize when \code{cov = TRUE}
+(default \code{1}).}
+
+\item{max_rblock}{Integer; maximum number of PC scores to harmonize when \code{cov = TRUE}
+(default \code{Inf}).}
 
 \item{...}{Additional arguments forwarded to \code{model}.}
 }

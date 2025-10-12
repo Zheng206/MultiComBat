@@ -11,7 +11,7 @@
 #' @importFrom MASS ginv mvrnorm
 #' @importFrom stats lm median model.matrix predict update var qnorm manova anova rt
 #'    fligner.test bartlett.test kruskal.test aov as.formula coef p.adjust resid residuals
-#'    rnorm rbinom runif
+#'    rnorm rbinom runif prcomp sd
 #' @importFrom dplyr bind_rows mutate select arrange filter group_by group_split pull
 #'    distinct left_join across everything
 #' @importFrom magrittr %>%
@@ -22,6 +22,7 @@
 #' @importFrom car leveneTest
 #' @importFrom ggplot2 ggplot aes geom_tile geom_text scale_fill_gradientn geom_density facet_wrap
 #'    labs theme_minimal theme element_text element_blank geom_histogram scale_fill_manual after_stat
+#'    coord_equal scale_color_brewer element_rect geom_point element_line stat_ellipse unit
 #'
 #' @importFrom MCMCpack rinvgamma riwish
 #'

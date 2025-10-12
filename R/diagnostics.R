@@ -495,5 +495,252 @@ evaluate_cov_recovery <- function(Sigma, Sigma_hat) {
   )
 }
 
-utils::globalVariables(c(".data", "p.value"))
+#' PCA prep for batch diagnostics (single or multiple measurements)
+#'
+#' Fits per-feature models (via [diag_model_gen()] + [diag_model_summary()]),
+#' extracts **additive residuals**, and runs PCA to obtain score matrices for
+#' visualization/diagnostics:
+#'
+#' - **Multivariate input** (`data` is a list of length *m*): run PCA within
+#'   each measurement to get `F_list` (per-measurement scores), then concatenate
+#'   scores and run a second PCA to get the shared score space `G`.
+#' - **Univariate input** (`data` is a matrix/data.frame): run a single PCA on
+#'   the residual matrix to get `F_t`.
+#'
+#' @param bat Either a factor of length *n* (univariate case), or a list of *m*
+#'   factors (one per measurement) of length *n* (multivariate).
+#' @param data Either an numeric matrix/data frame, or a list of *m*
+#'   such matrices/data frames (matching `bat`).
+#' @param covar Data frame of covariates. `NULL` for a null model,
+#'   or a list of data frames if `data` is a list.
+#' @param model Modeling function that accepts `formula` and `data`
+#'   (e.g., [stats::lm()], [mgcv::gam()], [lme4::lmer()]).
+#' @param formula RHS formula for covariates (do **not** include batch; it is
+#'   added internally when batch adjustment is enabled).
+#' @param ref.batch Optional reference batch level (forwarded to internal
+#'   modeling, if applicable).
+#' @param bat_adjust Logical; if `TRUE` (default) include batch dummies in the
+#'   per-feature model via `model_fitting()` (same behavior as in harmonization).
+#' @param ... Additional arguments forwarded to `model`.
+#'
+#' @return
+#' - **If `data` is a list (multivariate)**: a list with
+#'   \describe{
+#'     \item{F_list}{List of length *m*; each element is an \eqn{n \times r_t} PCA score
+#'       matrix from the within-measurement PCA on additive residuals.}
+#'     \item{G}{\eqn{n \times r_concat} matrix of scores from a second PCA on the
+#'       column-bound `F_list` (shared subject score space).}
+#'     \item{bat}{The input list of batch factors (returned for convenience).}
+#'   }
+#' - **If `data` is a matrix/data.frame (univariate)**: a list with
+#'   \describe{
+#'     \item{F_t}{\eqn{n \times r} PCA score matrix from the residual PCA.}
+#'     \item{bat}{The input batch factor (returned for convenience).}
+#'   }
+#'
+#' @details
+#' Residuals are the **additive** residuals produced by
+#' [diag_model_summary()], i.e., the data after removing non-batch fixed effects
+#' (and batch dummies if `bat_adjust = TRUE`).
+#'
+#' @examples
+#' set.seed(1)
+#' n <- 40; G <- 10
+#' X <- matrix(rnorm(n*G), n, G); colnames(X) <- paste0("g",1:G)
+#' b <- factor(rep(LETTERS[1:2], each = n/2))
+#' # Univariate (single measurement)
+#' pp1 <- pca_prep(b, X, covar = NULL, model = stats::lm, formula = y ~ 1)
+#' str(pp1$F_t)
+#'
+#' # Multivariate (two measurements)
+#' Y1 <- X + matrix(rnorm(n*G, sd=.3), n, G)
+#' Y2 <- X + matrix(rnorm(n*G, sd=.5), n, G)
+#' bats <- list(b, b)
+#' pp2 <- pca_prep(bats, list(Y1, Y2), covar = list(NULL,NULL),
+#'                 model = stats::lm, formula = y ~ 1)
+#' lapply(pp2$F_list, dim); dim(pp2$G)
+#'
+#' @seealso [diag_model_gen()], [diag_model_summary()], [pca_plot()]
+#' @export
+
+pca_prep <- function(bat, data, covar, model, formula = NULL, ref.batch = NULL, bat_adjust = TRUE, ...){
+  if(is.list(data)&& !is.data.frame(data) && !is.matrix(data)){
+    m <- length(data)
+    diag_model_list <- lapply(1:m, function(i) diag_model_gen(bat[[i]], data[[i]], covar[[i]], model, formula))
+    resid_add_list <- lapply(1:m, function(i) diag_model_summary(diag_model_list[[i]])$resid_add)
+    F_list <- lapply(1:m, function(i){
+      F_t <- prcomp(resid_add_list[[i]], center = TRUE, scale. = TRUE)$x
+      return(F_t)
+    })
+    F_concat <- do.call(cbind, F_list)
+    pc_concat <- prcomp(F_concat, center = TRUE, scale. = FALSE)
+    G <- pc_concat$x
+    return(list(F_list = F_list, G = G, bat = bat))
+  }else if(is.data.frame(data) || is.matrix(data)){
+    diag_model_result <- diag_model_gen(bat, data, covar, model, formula)
+    resid_add_df <- diag_model_summary(diag_model_result)$resid_add
+    F_t <- prcomp(resid_add_df, center = TRUE, scale. = TRUE)$x
+    return(list(F_t = F_t, bat = bat))
+  }else{
+    stop("`data` must be a data.frame, matrix, or a list of those.")
+  }
+
+}
+
+
+#' PCA scatterplots colored by batch/site
+#'
+#' Convenience plotting for the objects returned by [pca_prep()].
+#' Produces 2D PC scatterplots colored by `bat`, with optional 68% ellipses.
+#'
+#' - **When `pca_prep_result` came from multivariate input**:
+#'   * `type = "within"` (default) plots per-measurement PC scores from `F_list`
+#'     faceted by measurement.
+#'   * `type = "shared"` plots the shared subject score space `G` (second-stage PCA).
+#' - **When `pca_prep_result` came from univariate input**:
+#'   plots the single `F_t` score matrix.
+#'
+#' @param pca_prep_result The list returned by [pca_prep()].
+#' @param type For multivariate results, either `"within"` (per-measurement
+#'   PCs) or `"shared"` (shared score space `G`). Ignored for univariate results.
+#' @param pc_1,pc_2 Integers giving which principal components to plot on
+#'   the x/y axes (default `1` and `2`).
+#' @param ellipse Logical; draw 68% normal ellipses per batch (default `TRUE`).
+#'
+#' @return A `ggplot` object you can print or add layers to.
+#'
+#' @examples
+#' \dontrun{
+#' set.seed(2)
+#' n <- 40; G <- 8
+#' X <- matrix(rnorm(n*G), n, G); colnames(X) <- paste0("g",1:G)
+#' b <- factor(rep(LETTERS[1:2], each=n/2))
+#' ppu <- pca_prep(b, X, covar = NULL, model = stats::lm, formula = y ~ 1)
+#' p <- pca_plot(ppu, pc_1 = 1, pc_2 = 2, ellipse = TRUE)
+#' # print(p)
+#'
+#' Y1 <- X + matrix(rnorm(n*G, sd=.3), n, G)
+#' Y2 <- X + matrix(rnorm(n*G, sd=.5), n, G)
+#' bats <- list(b, b)
+#' ppm <- pca_prep(bats, list(Y1, Y2), covar = list(NULL,NULL),
+#'                 model = stats::lm, formula = y ~ 1)
+#' p_within <- pca_plot(ppm, type = "within")
+#' p_shared <- pca_plot(ppm, type = "shared")
+#' }
+#'
+#' @seealso [pca_prep()], [ggplot2::ggplot()], [ggplot2::stat_ellipse()]
+#' @importFrom ggplot2 scale_color_brewer facet_wrap element_text element_rect
+#' @importFrom ggplot2 element_blank
+#' @export
+pca_plot <- function(pca_prep_result, type = "within", pc_1 = 1, pc_2 = 2, ellipse = TRUE){
+  pc_pair <- paste0("PC", c(pc_1, pc_2))
+  element_names <- names(pca_prep_result)
+  if("F_list" %in% element_names){
+    if(type == "within"){
+      m <- length(pca_prep_result$F_list); p <- ncol(pca_prep_result$F_list[[1]])
+      F_df_con <- lapply(1:m, function(i) pca_prep_result$F_list[[i]] %>% data.frame() %>%
+                           mutate(measurement = paste0("M_", i), bat = pca_prep_result$bat[[i]])) %>%
+        bind_rows() %>% dplyr::select(dplyr::all_of(pc_pair), measurement, bat)
+      plt <- ggplot(
+        F_df_con,
+        aes(x = .data[[pc_pair[1]]], y = .data[[pc_pair[2]]], color = bat)
+      ) +
+        geom_point(alpha = 0.7, size = 1.6, stroke = 0) +
+        facet_wrap(~ measurement, ncol = 3) +
+        coord_equal() +
+        labs(
+          x = pc_pair[1],
+          y = pc_pair[2],
+          color = "Batch / Site"
+        ) +
+        scale_color_brewer(palette = "Set2") +   # or: scale_color_viridis_d()
+        theme_minimal(base_size = 12) +
+        theme(
+          panel.grid.minor = element_blank(),
+          panel.grid.major = element_line(linewidth = 0.2),
+          strip.text = element_text(face = "bold"),
+          strip.background = element_rect(fill = "grey95", color = NA),
+          legend.position = "bottom",
+          legend.title = element_text(face = "bold"),
+          plot.title.position = "plot",
+          panel.spacing = unit(6, "pt"),
+          axis.title = element_text(face = "bold")
+        )
+      if(ellipse){
+        plt + stat_ellipse(level = 0.68, linewidth = 0.6, show.legend = FALSE)
+      }else{
+        plt
+      }
+
+    }else{
+      G_df <- pca_prep_result$G %>% data.frame() %>% mutate(bat = pca_prep_result$bat[[1]])
+      plt <- ggplot(
+        G_df,
+        aes(x = .data[[pc_pair[1]]], y = .data[[pc_pair[2]]], color = bat)
+      ) +
+        geom_point(alpha = 0.7, size = 1.6, stroke = 0) +
+        coord_equal() +
+        labs(
+          x = pc_pair[1],
+          y = pc_pair[2],
+          color = "Batch / Site"
+        ) +
+        scale_color_brewer(palette = "Set2") +
+        theme_minimal(base_size = 12) +
+        theme(
+          panel.grid.minor = element_blank(),
+          panel.grid.major = element_line(linewidth = 0.2),
+          strip.text = element_text(face = "bold"),
+          strip.background = element_rect(fill = "grey95", color = NA),
+          legend.position = "bottom",
+          legend.title = element_text(face = "bold"),
+          plot.title.position = "plot",
+          panel.spacing = unit(6, "pt"),
+          axis.title = element_text(face = "bold")
+        )
+
+      if(ellipse){
+        plt + stat_ellipse(level = 0.68, linewidth = 0.6, show.legend = FALSE)
+      }else{
+        plt
+      }
+    }
+  }else{
+    F_df <- pca_prep_result$F_t %>% data.frame() %>% mutate(bat = pca_prep_result$bat)
+    plt <- ggplot(
+      F_df,
+      aes(x = .data[[pc_pair[1]]], y = .data[[pc_pair[2]]], color = bat)
+    ) +
+      geom_point(alpha = 0.7, size = 1.6, stroke = 0) +
+      stat_ellipse(level = 0.68, linewidth = 0.6, show.legend = FALSE) +
+      coord_equal() +
+      labs(
+        x = pc_pair[1],
+        y = pc_pair[2],
+        color = "Batch / Site"
+      ) +
+      scale_color_brewer(palette = "Set2") +
+      theme_minimal(base_size = 12) +
+      theme(
+        panel.grid.minor = element_blank(),
+        panel.grid.major = element_line(linewidth = 0.2),
+        strip.text = element_text(face = "bold"),
+        strip.background = element_rect(fill = "grey95", color = NA),
+        legend.position = "bottom",
+        legend.title = element_text(face = "bold"),
+        plot.title.position = "plot",
+        panel.spacing = unit(6, "pt"),
+        axis.title = element_text(face = "bold")
+      )
+
+    if(ellipse){
+      plt + stat_ellipse(level = 0.68, linewidth = 0.6, show.legend = FALSE)
+    }else{
+      plt
+    }
+  }
+
+}
+
+utils::globalVariables(c(".data", "p.value", "bat"))
 

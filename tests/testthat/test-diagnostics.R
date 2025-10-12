@@ -160,4 +160,101 @@ test_that("covariance metrics increase with larger perturbations", {
   expect_lt(eigen_error(S, Sh_small), eigen_error(S, Sh_big))
 })
 
+test_that("pca_prep works for univariate input (matrix/data.frame)", {
+  set.seed(1)
+  n <- 40; G <- 10
+  X <- matrix(rnorm(n * G), n, G)
+  colnames(X) <- paste0("g", seq_len(G))
+  bat <- factor(rep(LETTERS[1:2], each = n/2))
+
+  # Use a null model (intercept only) to avoid warnings
+  out <- suppressWarnings(pca_prep(bat, data = X, covar = NULL, model = stats::lm, formula = y ~ 1))
+
+  expect_type(out, "list")
+  expect_true(all(c("F_t", "bat") %in% names(out)))
+  expect_equal(nrow(out$F_t), n)
+  expect_gt(ncol(out$F_t), 0)
+  expect_identical(out$bat, bat)
+})
+
+test_that("pca_prep works for multivariate input (list of matrices)", {
+  set.seed(2)
+  n <- 50; G <- 12
+  X1 <- matrix(rnorm(n * G), n, G)
+  X2 <- X1 + matrix(rnorm(n * G, sd = 0.3), n, G)
+  colnames(X1) <- colnames(X2) <- paste0("g", seq_len(G))
+  bat <- list(
+    factor(rep(LETTERS[1:2], each = n/2)),
+    factor(rep(LETTERS[1:2], each = n/2))
+  )
+  covar <- list(NULL, NULL)
+
+  out <- suppressWarnings(pca_prep(bat, data = list(X1, X2), covar = covar,
+                  model = stats::lm, formula = y ~ 1))
+
+  expect_type(out, "list")
+  expect_true(all(c("F_list", "G", "bat") %in% names(out)))
+  expect_length(out$F_list, 2)
+  expect_equal(nrow(out$F_list[[1]]), n)
+  expect_equal(nrow(out$F_list[[2]]), n)
+  expect_gt(ncol(out$F_list[[1]]), 0)
+  expect_gt(ncol(out$F_list[[2]]), 0)
+  expect_equal(nrow(out$G), n)
+  expect_gt(ncol(out$G), 0)
+  expect_identical(out$bat, bat)
+})
+
+test_that("pca_prep errors on unsupported data type", {
+  bat <- factor(rep(LETTERS[1:2], each = 5))
+  expect_error(
+    pca_prep(bat, data = "not-a-matrix", covar = NULL, model = stats::lm, formula = y ~ 1),
+    "`data` must be a data.frame, matrix, or a list of those."
+  )
+})
+
+test_that("pca_plot returns ggplot for univariate result; ellipse flag toggles layer count", {
+  set.seed(3)
+  n <- 30; G <- 8
+  X <- matrix(rnorm(n * G), n, G)
+  colnames(X) <- paste0("g", seq_len(G))
+  bat <- factor(rep(LETTERS[1:3], length.out = n))
+
+  prep <- suppressWarnings(pca_prep(bat, data = X, covar = NULL, model = stats::lm, formula = y ~ 1))
+
+  p1 <- pca_plot(prep, pc_1 = 1, pc_2 = 2, ellipse = TRUE)
+  p2 <- pca_plot(prep, pc_1 = 1, pc_2 = 2, ellipse = FALSE)
+
+  expect_s3_class(p1, "ggplot")
+  expect_s3_class(p2, "ggplot")
+  expect_gt(length(p1$layers), length(p2$layers))
+})
+
+test_that("pca_plot returns ggplot for multivariate result (within/shared), with sensible columns", {
+  set.seed(4)
+  n <- 36; G <- 9
+  X1 <- matrix(rnorm(n * G), n, G)
+  X2 <- matrix(rnorm(n * G), n, G)
+  colnames(X1) <- colnames(X2) <- paste0("g", seq_len(G))
+  bat <- list(
+    factor(rep(letters[1:3], each = n/3)),
+    factor(rep(letters[1:3], each = n/3))
+  )
+  covar <- list(NULL, NULL)
+
+  prep <- suppressWarnings(pca_prep(bat, data = list(X1, X2), covar = covar,
+                   model = stats::lm, formula = y ~ 1))
+
+  # within-measurement PCs
+  p_within <- pca_plot(prep, type = "within", pc_1 = 1, pc_2 = 2, ellipse = TRUE)
+  expect_s3_class(p_within, "ggplot")
+  expect_gt(length(p_within$layers), 0)
+
+  # shared PC space
+  p_shared <- pca_plot(prep, type = "shared", pc_1 = 1, pc_2 = 2, ellipse = FALSE)
+  expect_s3_class(p_shared, "ggplot")
+  expect_gt(length(p_shared$layers), 0)
+})
+
+
+
 

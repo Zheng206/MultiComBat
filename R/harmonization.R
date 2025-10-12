@@ -28,6 +28,15 @@
 #'   (\code{stan_data_prep()}, \code{stan_algorithm()}) instead of EB.
 #' @param robust.LS Logical; if \code{TRUE}, use robust scale estimators
 #'   (\code{\link{biweight_midvar}}) in standardization/dispersion.
+#' @param cov Logical; if \code{TRUE}, apply an additional CovBat-style covariance
+#'   harmonization in PCA score space after ComBat mean/variance adjustment (default \code{FALSE}).
+#' @param var_thresh Numeric in (0,1]; cumulative explained-variance threshold used
+#'   to choose how many PC scores are harmonized when \code{cov = TRUE}
+#'   (passed to \code{\link{pick_r_from_pc}}; default \code{0.95}).
+#' @param min_rblock Integer; minimum number of PC scores to harmonize when \code{cov = TRUE}
+#'   (default \code{1}).
+#' @param max_rblock Integer; maximum number of PC scores to harmonize when \code{cov = TRUE}
+#'   (default \code{Inf}).
 #' @param ... Additional arguments forwarded to \code{model}.
 #'
 #' @return A list with:
@@ -53,7 +62,7 @@
 #' str(out$harm_data)
 #'
 #' @export
-com_harm <- function(bat, data, covar, model = lm, formula = NULL, ref.batch = NULL, eb = TRUE, stan = FALSE, robust.LS = FALSE, ...){
+com_harm <- function(bat, data, covar, model = lm, formula = NULL, ref.batch = NULL, eb = TRUE, stan = FALSE, robust.LS = FALSE, cov = FALSE, var_thresh = 0.95, min_rblock = 1, max_rblock = Inf, ...){
   feature <- colnames(data)
   batch_result <- batch_matrix(bat, ref.batch = ref.batch)
   fitted_model <- model_fitting(data, batch_result$batch_matrix, covar, model, formula, ...)
@@ -87,6 +96,15 @@ com_harm <- function(bat, data, covar, model = lm, formula = NULL, ref.batch = N
   if (!is.null(batch_result$ref)) {
     data_combat[batch_result$ref,] <- data[batch_result$ref,]
   }
+
+  if(cov){
+    R <- data_combat - data_stand_result$stand_mean
+    R_star <- covbat(R, site = bat, center = TRUE, scale_scores = TRUE, var_thresh = var_thresh, min_rblock = min_rblock,
+                     max_rblock = max_rblock,
+                     ref.batch = ref.batch)
+    data_combat <- R_star + data_stand_result$stand_mean
+  }
+
   if(!stan){
     return(list(harm_data = data_combat, eb_result = eb_result, resid = data_nb))
   }else{
@@ -127,6 +145,16 @@ com_harm <- function(bat, data, covar, model = lm, formula = NULL, ref.batch = N
 #' @param stan Logical; if \code{TRUE}, use the full Bayesian (Stan) multivariate routine.
 #' @param robust.LS Logical; if \code{TRUE}, use robust estimators
 #'   (\code{\link{biweight_midvar}}, \code{\link{biweight_midvar_mul}}).
+#' @param cov Logical; if \code{TRUE}, apply an additional CovBat-style PCA
+#'   score-space coupling across measurements after the main multivariate step
+#'   (default \code{FALSE}).
+#' @param var_thresh Numeric in (0,1]; cumulative explained-variance threshold used
+#'   to choose how many PC scores per measurement are used in the stage-2 coupling
+#'   (default \code{0.95}).
+#' @param min_rblock Integer; minimum number of PC scores per measurement used in
+#'   stage-2 coupling (default \code{1}).
+#' @param max_rblock Integer; maximum number of PC scores per measurement used in
+#'   stage-2 coupling (default \code{Inf}).
 #' @param ... Additional arguments forwarded to \code{model}.
 #'
 #' @return A list with:
@@ -159,7 +187,7 @@ com_harm <- function(bat, data, covar, model = lm, formula = NULL, ref.batch = N
 #' }
 #'
 #' @export
-com_harm.multivariate <- function(bat, data, covar, model = lm, formula = NULL, ref.batch = NULL, eb = TRUE, stan = FALSE, robust.LS = FALSE, ...){
+com_harm.multivariate <- function(bat, data, covar, model = lm, formula = NULL, ref.batch = NULL, eb = TRUE, stan = FALSE, robust.LS = FALSE, cov = FALSE, var_thresh = 0.95, min_rblock = 1, max_rblock = Inf, ...){
   m <- length(data)
   data <- lapply(1:m, function(i) data.frame(data[[i]]))
   feature <- colnames(data[[1]])
@@ -235,6 +263,13 @@ com_harm.multivariate <- function(bat, data, covar, model = lm, formula = NULL, 
   if (!is.null(batch_result[[1]]$ref)) {
     lapply(1:m, function(i) data_combat[[i]][batch_result[[i]]$ref,] <- data[[i]][batch_result[[i]]$ref,])
   }
+
+  if(cov){
+    R_list <- lapply(1:m, function(i) data_combat[[i]] - data_stand_result[[i]]$stand_mean)
+    R_h_list <- stage2_variantA(R_list, site = bat, var_thresh = var_thresh, min_rblock = min_rblock, max_rblock = max_rblock)$R_h_list
+    data_combat <- lapply(1:m, function(i) R_h_list[[i]] + data_stand_result[[i]]$stand_mean)
+  }
+
   if(!stan){
     return(list(harm_data = data_combat, eb_result = eb_result, resid = data_nb))
   }else{
