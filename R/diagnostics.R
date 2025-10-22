@@ -440,7 +440,10 @@ mse_cov <- function(Sigma, Sigma_hat) {
 #' @family covariance-metrics
 #' @export
 spectral_norm <- function(Sigma, Sigma_hat) {
-  max(eigen(Sigma - Sigma_hat, symmetric = TRUE, only.values = TRUE)$values)
+  A <- Sigma - Sigma_hat
+  A <- 0.5 * (A + t(A))  # ensure symmetry numerically
+  ev <- eigen(A, symmetric = TRUE, only.values = TRUE)$values
+  max(abs(ev))
 }
 
 
@@ -472,9 +475,17 @@ eigen_error <- function(Sigma, Sigma_hat) {
 #' @export
 kl_divergence <- function(Sigma, Sigma_hat) {
   p <- ncol(Sigma)
-  epsilon <- 1e-6
-  inv_Sigma_hat <- solve(Sigma_hat + diag(epsilon, nrow(Sigma_hat)))
-  0.5 * (sum(diag(inv_Sigma_hat %*% Sigma)) - p + log(det(Sigma_hat) - log(det(Sigma))))
+  epsilon <- 1e-8
+  A <- 0.5 * (Sigma + t(Sigma))
+  B <- 0.5 * (Sigma_hat + t(Sigma_hat))
+  A <- Sigma + diag(epsilon, p)
+  B <- Sigma_hat + diag(epsilon, p)
+  cholB <- chol(B)
+  Binv  <- chol2inv(cholB)
+  tr_term <- sum(Binv * A)
+  logdetA <- 2 * sum(log(diag(chol(A))))
+  logdetB <- 2 * sum(log(diag(chol(B))))
+  0.5 * (tr_term - p + (logdetB - logdetA))
 }
 
 #' Evaluate covariance recovery with multiple metrics
