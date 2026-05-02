@@ -310,7 +310,7 @@ com_harm.multivariate <- function(bat, data, covar, model = lm, formula = NULL, 
   data_combat <- lapply(1:m, function(i) data_nb[[i]]*data_stand_result[[i]]$sd_mat + data_stand_result[[i]]$stand_mean)
 
   if (!is.null(batch_result[[1]]$ref)) {
-    lapply(1:m, function(i) data_combat[[i]][batch_result[[i]]$ref,] <- data[[i]][batch_result[[i]]$ref,])
+    for (i in 1:m) data_combat[[i]][batch_result[[i]]$ref, ] <- data[[i]][batch_result[[i]]$ref, ]
   }
 
   if(cov){
