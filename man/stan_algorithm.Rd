@@ -44,7 +44,7 @@ For multivariate: a list with \code{gamma_star} (named list of \eqn{m \times G} 
 \code{delta_star} (named list of length-\eqn{G} lists of \eqn{m \times m} matrices), and mcmc fitted model.
 
 For univariate: a list with matrices \code{gamma_star} and \code{delta_star}
-(rows = batches, columns = features).
+(rows = batches, columns = features), and mcmc fitted model.
 }
 \description{
 Stan algorithm (S3 generic)

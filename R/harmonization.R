@@ -155,6 +155,10 @@ com_harm <- function(bat, data, covar, model = lm, formula = NULL, ref.batch = N
 #'   stage-2 coupling (default \code{1}).
 #' @param max_rblock Integer; maximum number of PC scores per measurement used in
 #'   stage-2 coupling (default \code{Inf}).
+#' @param robust_cov Logical; if \code{TRUE}, instead of whitening the residual covariance to
+#' the identity matrix, the method aligns each batch to a covariance structure robustly estimated to
+#' be shared across batch levels, with the goal of preserving common residual dependence while removing
+#' batch-specific covariance deviations (default \code{FALSE}).
 #' @param ... Additional arguments forwarded to \code{model}.
 #'
 #' @return A list with:
@@ -187,7 +191,7 @@ com_harm <- function(bat, data, covar, model = lm, formula = NULL, ref.batch = N
 #' }
 #'
 #' @export
-com_harm.multivariate <- function(bat, data, covar, model = lm, formula = NULL, ref.batch = NULL, eb = TRUE, stan = FALSE, robust.LS = FALSE, cov = FALSE, var_thresh = 0.95, min_rblock = 1, max_rblock = Inf, ...){
+com_harm.multivariate <- function(bat, data, covar, model = lm, formula = NULL, ref.batch = NULL, eb = TRUE, stan = FALSE, robust.LS = FALSE, cov = FALSE, var_thresh = 0.95, min_rblock = 1, max_rblock = Inf, robust_cov = FALSE, ...){
   m <- length(data)
   data <- lapply(1:m, function(i) data.frame(data[[i]]))
   feature <- colnames(data[[1]])
@@ -201,6 +205,26 @@ com_harm.multivariate <- function(bat, data, covar, model = lm, formula = NULL, 
     data_nb <- lapply(1:m, function(i) data_stand_result[[i]]$data_stand)
     batch_levels <- names(eb_result$gamma_star)
     G <- length(feature)
+    ##
+    sigma0_rob <- vector("list", G)
+
+    for (g in seq_len(G)) {
+      Sigma_list <- lapply(batch_levels, function(b) eb_result$delta_star[[b]][[g]])
+
+      weights <- sapply(batch_levels, function(b) {
+        # use one batch index source consistently
+        n_b <- length(batch_result[[1]]$batch_index[[b]])
+        max(n_b - 1, 1)
+      })
+
+      fit <- robust_sigma0_from_eb(Sigma_list, weights = weights)
+      sigma0_rob[[g]] <- fit$sigma0
+    }
+    if (isTRUE(robust_cov) && isFALSE(fit$used_robust)) message(
+      "Too few batch levels for reliable robust weighting; ",
+      "using the default weighted-mean covariance target instead."
+    )
+    ##
     for (b in batch_levels){
       for(i in 1:m){
         data_nb[[i]][batch_result[[i]]$batch_index[[b]],] <- sweep(data_nb[[i]][batch_result[[i]]$batch_index[[b]],, drop = FALSE], 2,
@@ -211,7 +235,12 @@ com_harm.multivariate <- function(bat, data, covar, model = lm, formula = NULL, 
         data_nb_list <- lapply(1:m, function(i) data_nb[[i]][batch_result[[i]]$batch_index[[b]],])
         g_matrix <- multi_matrix_transform(data_nb_list, g)
         chol_inv_delta <- sigma_inv_sqrt(eb_result$delta_star[[b]][[g]])
-        data_batch <- chol_inv_delta %*% g_matrix
+        if(robust_cov){
+          chol_sigma0 <- sigma_sqrt(sigma0_rob[[g]])
+          data_batch  <- chol_sigma0 %*% chol_inv_delta %*% g_matrix
+        }else{
+          data_batch <- chol_inv_delta %*% g_matrix
+        }
         batch_corrected_resi <- multi_matrix_transform_inverse(data_batch, feature[g])
         return(batch_corrected_resi)
       })
@@ -232,6 +261,21 @@ com_harm.multivariate <- function(bat, data, covar, model = lm, formula = NULL, 
     stan_result <- stan_algorithm(type, stan_data, batch_names = batch_levels)
     data_nb <- lapply(1:m, function(i) data_stand_result[[i]]$data_stand)
     G <- length(feature)
+    ##
+    sigma0_rob <- vector("list", G)
+    for (g in seq_len(G)) {
+      Sigma_list <- lapply(batch_levels, function(b) stan_result$delta_star[[b]][[g]])
+
+      weights <- sapply(batch_levels, function(b) {
+        # use one batch index source consistently
+        n_b <- length(batch_result[[1]]$batch_index[[b]])
+        max(n_b - 1, 1)
+      })
+
+      fit <- robust_sigma0_from_eb(Sigma_list, weights = weights)
+      sigma0_rob[[g]] <- fit$sigma0
+    }
+    ##
     for (b in batch_levels){
       for(i in 1:m){
         data_nb[[i]][batch_result[[i]]$batch_index[[b]],] <- sweep(data_nb[[i]][batch_result[[i]]$batch_index[[b]],, drop = FALSE], 2,
@@ -242,7 +286,12 @@ com_harm.multivariate <- function(bat, data, covar, model = lm, formula = NULL, 
         data_nb_list <- lapply(1:m, function(i) data_nb[[i]][batch_result[[i]]$batch_index[[b]],])
         g_matrix <- multi_matrix_transform(data_nb_list, g)
         chol_inv_delta <- sigma_inv_sqrt(stan_result$delta_star[[b]][[g]])
-        data_batch <- chol_inv_delta %*% g_matrix
+        if(robust_cov){
+          chol_sigma0 <- sigma_sqrt(sigma0_rob[[g]])
+          data_batch  <- chol_sigma0 %*% chol_inv_delta %*% g_matrix
+        }else{
+          data_batch <- chol_inv_delta %*% g_matrix
+        }
         batch_corrected_resi <- multi_matrix_transform_inverse(data_batch, feature[g])
         return(batch_corrected_resi)
       })
@@ -276,3 +325,5 @@ com_harm.multivariate <- function(bat, data, covar, model = lm, formula = NULL, 
     return(list(harm_data = data_combat, stan_result = stan_result, resid = data_nb))
   }
 }
+
+

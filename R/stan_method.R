@@ -260,7 +260,7 @@ stan_algorithm.multivariate <- function(type, stan_data, chains = 3, parallel_ch
 #' @param batch_names Character vector of batch level names (row names for outputs).
 #' @param ... Unused; for S3 compatibility.
 #' @return For univariate: a list with matrices \code{gamma_star} and \code{delta_star}
-#'   (rows = batches, columns = features).
+#'   (rows = batches, columns = features), and mcmc fitted model.
 #' @method stan_algorithm univariate
 #' @export
 stan_algorithm.univariate <- function(type, stan_data, chains = 3, parallel_chains = 3, batch_names, ...){
@@ -303,7 +303,7 @@ stan_algorithm.univariate <- function(type, stan_data, chains = 3, parallel_chai
 
   end_time <- Sys.time()
   message(sprintf("\nCompleted in %s", format(end_time - start_time)))
-  return(list(gamma_star = gamma_star, delta_star = delta_star))
+  return(list(gamma_star = gamma_star, delta_star = delta_star, fit = fit))
 }
 
 utils::globalVariables(c(

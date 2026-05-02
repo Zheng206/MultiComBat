@@ -309,6 +309,6 @@ covbat <- function(R, site, center = TRUE,
     data_covbat <- full_scores %*% t(pf$rotation) +
       matrix(pf$center, n, p, byrow = TRUE)
   }
-  return(data_covbat)
+  return(data.frame(data_covbat))
 }
 

@@ -59,16 +59,23 @@ multi_matrix_transform_inverse <- function(Zi_matrix, g_name){
 }
 
 
-#' Inverse square root of a (near) SPD matrix via eigen-decomposition
+#' Numerically stabilized inverse square root of a symmetric matrix
 #'
-#' Computes \eqn{\Sigma^{-1/2}} from an eigen factorization, thresholding small
-#' or non-positive eigenvalues to \code{tol} for numerical stability.
+#' Computes a stabilized matrix inverse square root \eqn{\Sigma^{-1/2}} via
+#' eigen-decomposition. For numerical stability, eigenvalues smaller than
+#' \code{tol} are replaced by \code{tol} before inversion.
 #'
-#' @param sigma Symmetric (ideally positive semi-definite) \eqn{p \times p} matrix.
-#' @param tol Numeric tolerance; eigenvalues smaller than \code{tol} are replaced
-#'   by \code{tol}. Default \code{1e-6}.
+#' @param sigma A symmetric \eqn{p \times p} matrix, ideally positive
+#'   semi-definite.
+#' @param tol Numeric tolerance. Eigenvalues smaller than \code{tol} are
+#'   replaced by \code{tol}. Default is \code{1e-6}.
 #'
-#' @return A \eqn{p \times p} matrix \eqn{\Sigma^{-1/2}}.
+#' @return A \eqn{p \times p} symmetric matrix giving the inverse square root
+#'   based on the thresholded eigenvalues of \code{sigma}.
+#'
+#' @details
+#' If any eigenvalues of \code{sigma} are smaller than \code{tol}, they are
+#' replaced by \code{tol}, and a warning is issued.
 #'
 #' @examples
 #' set.seed(1)
@@ -80,21 +87,174 @@ multi_matrix_transform_inverse <- function(Zi_matrix, g_name){
 #' @export
 
 sigma_inv_sqrt <- function(sigma, tol = 1e-6){
-  eig <- eigen(sigma)
-  eig_values <- eig$values
+  eig <- eigen(sigma, symmetric = TRUE)
+  orig_values <- eig$values
+  eig_values <- orig_values
 
-  # Check for non-positive eigenvalues (close to zero) and threshold them
   eig_values[eig_values < tol] <- tol
 
-  # If any eigenvalue is zero or negative, print a warning
-  if (any(eig_values <= 0)) {
-    warning("Some eigenvalues are zero or negative. Small eigenvalues have been thresholded.")
+  if (any(orig_values < tol)) {
+    warning("Some eigenvalues were very small or non-positive and were thresholded.")
   }
 
   Q <- eig$vectors
-  Lambda_inv_sqrt <- diag(1 / sqrt(eig_values))
+  Lambda_inv_sqrt <- diag(1 / sqrt(eig_values), nrow = length(eig_values))
   inv_sqrt <- Q %*% Lambda_inv_sqrt %*% t(Q)
   return(inv_sqrt)
+}
+
+
+#' Numerically stabilized square root of a symmetric matrix
+#'
+#' Computes a stabilized matrix square root \eqn{\Sigma^{1/2}} via
+#' eigen-decomposition. For numerical stability, eigenvalues smaller than
+#' \code{tol} are replaced by \code{tol} before taking square roots.
+#'
+#' @param sigma A symmetric \eqn{p \times p} matrix, ideally positive
+#'   semi-definite.
+#' @param tol Numeric tolerance. Eigenvalues smaller than \code{tol} are
+#'   replaced by \code{tol}. Default is \code{1e-6}.
+#'
+#' @return A \eqn{p \times p} symmetric matrix giving the square root
+#'   based on the thresholded eigenvalues of \code{sigma}.
+#'
+#' @details
+#' If any eigenvalues of \code{sigma} are smaller than \code{tol}, they are
+#' replaced by \code{tol}, and a warning is issued. As a result, the returned
+#' matrix is the square root of a regularized version of \code{sigma}, rather
+#' than necessarily the exact square root of the original matrix.
+#'
+#' @examples
+#' set.seed(1)
+#' A <- crossprod(matrix(rnorm(25), 5, 5))  # SPD
+#' S <- sigma_sqrt(A)
+#' round(max(abs(S %*% S - A)), 6)
+#'
+#' @export
+
+sigma_sqrt <- function(sigma, tol = 1e-6){
+  eig <- eigen(sigma, symmetric = TRUE)
+  orig_values <- eig$values
+  eig_values <- orig_values
+
+  eig_values[eig_values < tol] <- tol
+
+  if (any(orig_values < tol)) {
+    warning("Some eigenvalues were very small or non-positive and were thresholded.")
+  }
+
+  Q <- eig$vectors
+  Lambda_sqrt <- diag(sqrt(eig_values), nrow = length(eig_values))
+  sqrt_mat <- Q %*% Lambda_sqrt %*% t(Q)
+  return(sqrt_mat)
+}
+
+
+#' Robust target covariance from batch-specific covariance estimates
+#'
+#' Computes a pooled target covariance matrix from a list of batch-specific
+#' covariance estimates, with optional robust down-weighting of batches whose
+#' covariance matrices are far from an initial weighted mean in Frobenius norm.
+#'
+#' @param Sigma_list A list of symmetric covariance matrices, typically one
+#'   per batch.
+#' @param weights Optional nonnegative numeric vector of batch weights of the
+#'   same length as \code{Sigma_list}. If \code{NULL}, equal weights are used.
+#' @param eps Small positive constant added for numerical stability when
+#'   computing robust scale estimates and adaptive weights. Default is
+#'   \code{1e-8}.
+#' @param min_batches_robust Minimum number of batch levels required to apply
+#'   robust reweighting. If the number of matrices in \code{Sigma_list} is less
+#'   than this threshold, the function returns the default weighted mean without
+#'   robust adjustment. Default is \code{3}.
+#'
+#' @return A list with components:
+#' \describe{
+#'   \item{\code{sigma0}}{The final pooled target covariance matrix.}
+#'   \item{\code{sigma0_init}}{The initial weighted mean covariance matrix
+#'   before robust reweighting.}
+#'   \item{\code{distances}}{Frobenius distances from each batch covariance
+#'   matrix to \code{sigma0_init}.}
+#'   \item{\code{adaptive_weights}}{Robust adaptive weights derived from the
+#'   distances. These are all 1 when robust reweighting is not used.}
+#'   \item{\code{final_weights}}{The final weights used to pool the covariance
+#'   matrices, equal to the product of \code{weights} and
+#'   \code{adaptive_weights}.}
+#'   \item{\code{used_robust}}{Logical indicator of whether robust reweighting
+#'   was applied.}
+#' }
+#'
+#' @details
+#' The function first computes an initial weighted mean covariance matrix.
+#' When enough batch levels are available, it then measures the Frobenius
+#' distance from each batch-specific covariance matrix to this initial center.
+#' These distances are summarized using the median and median absolute
+#' deviation (MAD), and a Huber-like down-weighting rule is used to reduce the
+#' influence of outlying batch covariance matrices. The final target covariance
+#' is the weighted average under these robustified weights.
+#'
+#' If fewer than \code{min_batches_robust} batch levels are provided, the
+#' function falls back to the default weighted mean and returns
+#' \code{used_robust = FALSE}.
+#'
+#' @examples
+#' set.seed(1)
+#' S1 <- crossprod(matrix(rnorm(9), 3, 3))
+#' S2 <- crossprod(matrix(rnorm(9), 3, 3))
+#' S3 <- crossprod(matrix(rnorm(9), 3, 3))
+#'
+#' out <- robust_sigma0_from_eb(list(S1, S2, S3))
+#' out$sigma0
+#' out$adaptive_weights
+#'
+#' @seealso \code{\link{frobenius_norm}}
+#' @export
+robust_sigma0_from_eb <- function(Sigma_list, weights = NULL, eps = 1e-8,
+                                  min_batches_robust = 3) {
+  B <- length(Sigma_list)
+  if (is.null(weights)) weights <- rep(1, B)
+
+  # initial weighted mean
+  wsum <- sum(weights)
+  Sigma_init <- Reduce(`+`, Map(function(S, w) w * S, Sigma_list, weights)) / wsum
+
+  # fallback to default weighted mean when too few batch levels
+  if (B < min_batches_robust) {
+    return(list(
+      sigma0 = Sigma_init,
+      sigma0_init = Sigma_init,
+      distances = rep(NA_real_, B),
+      adaptive_weights = rep(1, B),
+      final_weights = weights,
+      used_robust = FALSE
+    ))
+  }
+
+  # distances to initial center
+  d <- sapply(Sigma_list, function(S) frobenius_norm(S, Sigma_init))
+
+  # robust scale of distances
+  med_d <- median(d, na.rm = TRUE)
+  mad_d <- mad(d, center = med_d, constant = 1, na.rm = TRUE) + eps
+
+  # Huber-like adaptive weights
+  cutoff <- med_d + 1.5 * mad_d
+  a <- pmin(1, cutoff / (d + eps))
+
+  # combined weights
+  w_rob <- weights * a
+  w_rob_sum <- sum(w_rob)
+
+  Sigma_rob <- Reduce(`+`, Map(function(S, w) w * S, Sigma_list, w_rob)) / w_rob_sum
+
+  list(
+    sigma0 = Sigma_rob,
+    sigma0_init = Sigma_init,
+    distances = d,
+    adaptive_weights = a,
+    final_weights = w_rob,
+    used_robust = TRUE
+  )
 }
 
 #' Robust matrix inversion/solve with fallbacks

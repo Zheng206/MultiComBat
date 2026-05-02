@@ -12,6 +12,7 @@ pca_prep(
   formula = NULL,
   ref.batch = NULL,
   bat_adjust = TRUE,
+  test_param = list(random = NULL),
   ...
 )
 }
@@ -36,6 +37,10 @@ modeling, if applicable).}
 
 \item{bat_adjust}{Logical; if \code{TRUE} (default) include batch dummies in the
 per-feature model via \code{model_fitting()} (same behavior as in harmonization).}
+
+\item{test_param}{List of extra parameters forwarded to \code{\link[=diag_model_summary]{diag_model_summary()}}.
+For example \code{list(random = NULL)} for no random effects, or other supported
+knobs used by diagnostic summary.}
 
 \item{...}{Additional arguments forwarded to \code{model}.}
 }

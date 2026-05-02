@@ -12,15 +12,29 @@ diag_model_summary <- function(diag_model, ...) {
 #' @export
 diag_model_summary.lm_model <- function(diag_model, ...){
   fits <- diag_model$fits
+  Y <- as.matrix(diag_model$data)
   coefs <- sapply(fits, coef)
-  data <- diag_model$data
-  covar_name <- names(diag_model$mod)
-  covar_name <- covar_name[which(!grepl("batch", covar_name))]
-  covar <- diag_model$mod[, covar_name] |> as.data.frame()
-  colnames(covar) <- covar_name
-  covar <- model.matrix(as.formula(paste0("~ ", paste0(covar_name, collapse = "+"), "-1")), data = covar)
-  resid_add <- data - covar %*% coefs[colnames(covar), ]
-  resid_mul <- sapply(fits, resid)
+  fix_list <- lapply(fits, function(model) {
+    X <- stats::model.matrix(model)
+    beta <- stats::coef(model)
+    X <- X[, !grepl("^batch", colnames(X)), drop = FALSE]
+    beta <- beta[!grepl("^batch", names(beta))]
+    common <- intersect(colnames(X), names(beta))
+    if (length(common) == 0) {
+      return(rep(0, nrow(X)))
+    }
+    missing <- setdiff(colnames(X), names(beta))
+    if (length(missing) > 0) {
+      stop("Missing coefficient(s) for: ", paste(missing, collapse = ", "))
+    }
+    as.numeric(X[, common, drop = FALSE] %*% beta[common])
+  })
+  fix_effects <- do.call(cbind, fix_list)
+  if (nrow(Y) != nrow(fix_effects)) {
+    stop("Row mismatch: nrow(data) != nobs in lm fits.")
+  }
+  resid_add <- Y - fix_effects
+  resid_mul <- sapply(fits, resid, simplify = "matrix")
   diag_summary <- list(coef = coefs, resid_add = resid_add, resid_mul = resid_mul)
   class(diag_summary) <- "diag_summary"
   return(diag_summary)
@@ -31,16 +45,35 @@ diag_model_summary.lm_model <- function(diag_model, ...){
 #' @export
 diag_model_summary.gam_model <- function(diag_model, ...){
   fits <- diag_model$fits
+  Y <- diag_model$data
   coefs <- sapply(fits, coef)
-  data <- diag_model$data
-  fix_effects <- sapply(fits, function(model){
-    covar_matrix <- model.matrix(model)
-    covar_matrix <- covar_matrix[, which(!grepl("batch", colnames(covar_matrix)))]
-    coef_value <- coef(model)[which(!grepl("batch", names(coef(model))))]
-    covar_matrix %*% coef_value
-  }) |> data.frame()
-  resid_add <- data - fix_effects
-  resid_mul <- sapply(fits, resid)
+  fix_list <- lapply(fits, function(model) {
+    X <- stats::model.matrix(model)
+    beta <- stats::coef(model)
+    keep_X <- !grepl("^batch", colnames(X))
+    X <- X[, keep_X, drop = FALSE]
+    keep_b <- !grepl("^batch", names(beta))
+    beta <- beta[keep_b]
+    common <- intersect(colnames(X), names(beta))
+    if (length(common) == 0) {
+      return(rep(0, nrow(X)))
+    }
+    if (length(common) != ncol(X)) {
+      missing <- setdiff(colnames(X), names(beta))
+      if (length(missing) > 0) {
+        stop("Missing coefficient(s) for: ", paste(missing, collapse = ", "))
+      }
+      X <- X[, common, drop = FALSE]
+    }
+    as.numeric(X %*% beta[common])
+  })
+  fix_effects <- do.call(cbind, fix_list)
+  Y_mat <- as.matrix(Y)
+  if (nrow(Y_mat) != nrow(fix_effects)) {
+    stop("Row mismatch: nrow(data) != nobs in GAM fits.")
+  }
+  resid_add <- Y_mat - fix_effects
+  resid_mul <- sapply(fits, resid, simplify = "matrix")
   diag_summary <- list(coef = coefs, resid_add = resid_add, resid_mul = resid_mul)
   class(diag_summary) <- "diag_summary"
   return(diag_summary)
@@ -52,30 +85,55 @@ diag_model_summary.gam_model <- function(diag_model, ...){
 #' @export
 diag_model_summary.lmerMod_model <- function(diag_model, random, ...){
   fits <- diag_model$fits
-  coefs <- sapply(fits, function(x) {
-    coef_result <- coef(x)[[1]]
-    coef_result <- coef_result[, which(!grepl("(Intercept)", names(coef_result)))] %>% distinct()
-    return(coef_result)
-  }) %>% as.matrix()
-  rand_effects <- sapply(fits, function(x) {
-    coef_result <- coef(x)[[1]]
-    coef_result <- coef_result[, which(grepl("(Intercept)", names(coef_result)))]
-    return(coef_result)
-  }) %>% as.matrix()
-  sub_id <- rownames(coef(fits[[1]])[[1]])
-  rand_df <- cbind(sub_id, rand_effects) |> data.frame() %>% mutate(sub_id = as.factor(sub_id), across(-1, ~as.numeric(.)))
-  rand_df <- data.frame(sub_id = as.factor(diag_model$mod[[random]])) %>% left_join(rand_df, by = "sub_id")
-  data <- diag_model$data
-  covar_name <- names(diag_model$mod)
-  covar_name <- covar_name[which(!grepl("batch", covar_name))]
-  covar_name <- covar_name[which(!grepl(random, covar_name))]
-  covar <- diag_model$mod[, covar_name] |> as.data.frame()
-  colnames(covar) <- covar_name
-  covar <- model.matrix(as.formula(paste0("~ ", paste0(covar_name, collapse = "+"), "-1")), data = covar)
-  coef_mat <- as.matrix(coefs[colnames(covar), ])
-  coef_mat <- apply(coef_mat, 2, as.numeric)
-  resid_add <- data - (covar %*% coef_mat + as.matrix(rand_df[, -1]))
-  resid_mul <- sapply(fits, resid)
+  Y    <- diag_model$data
+  df   <- diag_model$mod
+  coefs <- sapply(fits, function(m) lme4::fixef(m), simplify = "matrix")
+  if (!is.character(random) || length(random) == 0) {
+    stop("`random` must be a non-empty character vector of grouping-factor names.")
+  }
+  rand_mat <- sapply(fits, function(m) {
+    N <- nrow(df)
+    add_total <- numeric(N)
+    re_all <- lme4::ranef(m)
+    for (r in random) {
+      if (!r %in% names(re_all)) {
+        stop("Grouping factor `", r, "` not found in ranef(model). Available: ",
+             paste(names(re_all), collapse = ", "))
+      }
+      re_mat <- re_all[[r]]
+      if (!"(Intercept)" %in% colnames(re_mat)) {
+        stop("Random intercept not found for grouping factor: ", r)
+      }
+      ids <- as.character(df[[r]])
+      idx <- match(ids, rownames(re_mat))
+      add <- numeric(N)
+      ok <- !is.na(idx)
+      add[ok] <- re_mat[idx[ok], "(Intercept)"]
+      add_total <- add_total + add
+    }
+    add_total
+  })
+  rand_mat <- as.matrix(rand_mat)
+  X <- lme4::getME(fits[[1]], "X")
+  keep <- !grepl("^batch", colnames(X))
+  X <- X[, keep, drop = FALSE]
+  X <- X[, colnames(X) != "(Intercept)", drop = FALSE]
+  if (ncol(X) == 0) {
+    resid_add <- as.matrix(Y) - rand_mat
+    resid_mul <- sapply(fits, resid, simplify = "matrix")
+    diag_summary <- list(coef = coefs, resid_add = resid_add, resid_mul = resid_mul)
+    class(diag_summary) <- "diag_summary"
+    return(diag_summary)
+  }
+  common <- intersect(colnames(X), rownames(coefs))
+  if (length(common) != ncol(X)) {
+    missing <- setdiff(colnames(X), rownames(coefs))
+    stop("Coefficient(s) missing for X columns: ", paste(missing, collapse = ", "))
+  }
+  B <- coefs[common, , drop = FALSE]
+  B <- apply(B, 2, as.numeric)
+  resid_add <- Y - (X[, common, drop = FALSE] %*% B + rand_mat)
+  resid_mul <- sapply(fits, resid, simplify = "matrix")
   diag_summary <- list(coef = coefs, resid_add = resid_add, resid_mul = resid_mul)
   class(diag_summary) <- "diag_summary"
   return(diag_summary)
@@ -532,6 +590,9 @@ evaluate_cov_recovery <- function(Sigma, Sigma_hat) {
 #'   modeling, if applicable).
 #' @param bat_adjust Logical; if `TRUE` (default) include batch dummies in the
 #'   per-feature model via `model_fitting()` (same behavior as in harmonization).
+#' @param test_param List of extra parameters forwarded to [diag_model_summary()].
+#'   For example `list(random = NULL)` for no random effects, or other supported
+#'   knobs used by diagnostic summary.
 #' @param ... Additional arguments forwarded to `model`.
 #'
 #' @return
@@ -574,11 +635,13 @@ evaluate_cov_recovery <- function(Sigma, Sigma_hat) {
 #' @seealso [diag_model_gen()], [diag_model_summary()], [pca_plot()]
 #' @export
 
-pca_prep <- function(bat, data, covar, model, formula = NULL, ref.batch = NULL, bat_adjust = TRUE, ...){
+pca_prep <- function(bat, data, covar, model, formula = NULL, ref.batch = NULL, bat_adjust = TRUE, test_param = list(random = NULL), ...){
   if(is.list(data)&& !is.data.frame(data) && !is.matrix(data)){
     m <- length(data)
     diag_model_list <- lapply(1:m, function(i) diag_model_gen(bat[[i]], data[[i]], covar[[i]], model, formula))
-    resid_add_list <- lapply(1:m, function(i) diag_model_summary(diag_model_list[[i]])$resid_add)
+    resid_add_list <- lapply(1:m, function(i) {
+      diag_summary <- do.call(diag_model_summary, c(list(diag_model = diag_model_list[[i]]), test_param))
+      diag_summary $resid_add})
     F_list <- lapply(1:m, function(i){
       F_t <- prcomp(resid_add_list[[i]], center = TRUE, scale. = TRUE)$x
       return(F_t)
@@ -589,7 +652,8 @@ pca_prep <- function(bat, data, covar, model, formula = NULL, ref.batch = NULL, 
     return(list(F_list = F_list, G = G, bat = bat))
   }else if(is.data.frame(data) || is.matrix(data)){
     diag_model_result <- diag_model_gen(bat, data, covar, model, formula)
-    resid_add_df <- diag_model_summary(diag_model_result)$resid_add
+    diag_summary <- do.call(diag_model_summary, c(list(diag_model = diag_model_result), test_param))
+    resid_add_df <- diag_summary$resid_add
     F_t <- prcomp(resid_add_df, center = TRUE, scale. = TRUE)$x
     return(list(F_t = F_t, bat = bat))
   }else{

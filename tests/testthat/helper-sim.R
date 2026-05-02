@@ -292,6 +292,7 @@ simulate_data.m <- function(
       beta = list(Age = beta_age, Sex = beta_sex, Diagnosis = beta_diag),
       biomarkers = biomarkers,
       diagnosis = lapply(1:m, function(i) Diagnosis),
+      Sigma_ig = Sigma_ig,
       true_params = true_params,
       settings = list(
         m = m, n = n, p = p, K = K,
@@ -526,3 +527,4 @@ make_covbat_sigmas <- function(Sigma0, K, r = 3,
   jitter_fun <- function(S, sd = jitter_sd) S + diag(abs(rnorm(nrow(S), 0, sd)))
   list(Sigmas_k = Sigmas_k, jitter_fun = jitter_fun)
 }
+

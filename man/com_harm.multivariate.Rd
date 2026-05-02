@@ -18,6 +18,7 @@ com_harm.multivariate(
   var_thresh = 0.95,
   min_rblock = 1,
   max_rblock = Inf,
+  robust_cov = FALSE,
   ...
 )
 }
@@ -60,6 +61,11 @@ stage-2 coupling (default \code{1}).}
 
 \item{max_rblock}{Integer; maximum number of PC scores per measurement used in
 stage-2 coupling (default \code{Inf}).}
+
+\item{robust_cov}{Logical; if \code{TRUE}, instead of whitening the residual covariance to
+the identity matrix, the method aligns each batch to a covariance structure robustly estimated to
+be shared across batch levels, with the goal of preserving common residual dependence while removing
+batch-specific covariance deviations (default \code{FALSE}).}
 
 \item{...}{Additional arguments forwarded to \code{model}.}
 }
